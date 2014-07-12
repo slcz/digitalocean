@@ -4,6 +4,7 @@
 {-# LANGUAGE OverloadedStrings, ScopedTypeVariables, DeriveGeneric #-}
 
 import Data.Aeson
+import Data.List
 import Data.Aeson.Types hiding (Options, defaultOptions)
 import Data.Maybe
 import qualified Data.Text as T
@@ -362,7 +363,8 @@ listsizes = do
                 decomposetoplevel "sizes"
         forM_ v $ TIO.putStrLn . sslug
 
-header = "Usage: digitalocean [OPTION...] commands"
+header = "Usage: digitalocean [OPTION...] COMMAND\n    COMMAND:\n" ++
+         (intercalate "\n" $ map fst actionTable) ++ "\n\n"
 
 main :: IO ()
 main = do
@@ -370,6 +372,7 @@ main = do
     let (opt, nonOpts, msgs) = getOpt Permute options args
     when (not $ null msgs) $ ioError (userError
         (concat msgs ++ usageInfo header options))
+    when (null nonOpts) $ ioError (userError (usageInfo header options))
     flags <- return $ foldl (flip id) defaultOptions opt
     maybetoken <- lookupEnv "TOKEN"
     when (not $ isJust maybetoken) $
