@@ -125,7 +125,7 @@ createdroplet = do
     keys <- liftIO $ listkeys token
     bodytext <- return $ makebody option keys
 
-    v :: Value <- liftIO $ sendReq "droplets" methodPost token bodytext
+    liftIO $ (sendReq "droplets" methodPost token bodytext :: IO Value)
     return ()
 
 {- Retrieve Droplets -}
@@ -183,9 +183,8 @@ instance ToJSON Droplet
 listdroplets' :: ReaderT Options IO [Droplet]
 listdroplets' = do
     token <- liftM tokenArg ask
-    liftIO $ do
-        value <- sendReq "droplets" methodGet token L.empty
-        decomposetoplevel "droplets" value
+    liftIO $ sendReq "droplets" methodGet token L.empty >>=
+        decomposetoplevel "droplets"
 
 listdroplets :: ReaderT Options IO ()
 listdroplets = do
@@ -225,10 +224,7 @@ sendReq urlpartial method token body = do
         requestHeaders = headers,
         requestBody = RequestBodyLBS body }
     resp <- withManager $ \man -> httpLbs req' man
-    value <- return (eitherDecode $ responseBody resp)
-    case value of
-        Left err -> ioError (userError err)
-        Right v  -> return v
+    either (ioError . userError) return $ eitherDecode $ responseBody resp
 
 deletedroplet :: ReaderT Options IO ()
 deletedroplet = do
@@ -238,8 +234,8 @@ deletedroplet = do
         liftIO $ ioError (userError ("please provide image name"))
     name <- return $ fromJust maybename
     i <- finddroplet
-    _ :: Value <- liftIO $
-        sendReq ("droplets/" ++ show i) methodDelete token L.empty
+    liftIO $ (sendReq ("droplets/" ++ show i)
+        methodDelete token L.empty :: IO Value)
     return ()
 
 {- Retrieve Images -}
@@ -266,18 +262,15 @@ instance FromJSON Image where
 instance ToJSON Image
 
 decomposetoplevel :: FromJSON a => T.Text -> Object -> IO a
-decomposetoplevel key value = do
-    v <- return $ parseEither (.: key) value
-    case v of
-        Left err -> ioError (userError err)
-        Right v' -> return v'
+decomposetoplevel key value = either (ioError . userError) return $
+                                parseEither (.: key) value
 
 listimages :: ReaderT Options IO ()
 listimages = do
     token <- liftM tokenArg ask
     liftIO $ do
-        value <- sendReq "images" methodGet token L.empty
-        v <- decomposetoplevel "images" value
+        v <- sendReq "images" methodGet token L.empty >>=
+                decomposetoplevel "images"
         forM_ (filter public v) $ \m ->
             let s = slug m in
             when (isJust s) $ TIO.putStrLn $ fromJust $ s
@@ -301,8 +294,8 @@ instance ToJSON Key
 
 listkeys :: B.ByteString -> IO [Integer]
 listkeys token = do
-    value <- liftIO $ sendReq "account/keys" methodGet token L.empty
-    v <- decomposetoplevel "ssh_keys" value
+    v <- liftIO $ sendReq "account/keys" methodGet token L.empty >>=
+            decomposetoplevel "ssh_keys"
     return $ map kid v
 
 {- Retrieve Regions -}
@@ -329,8 +322,8 @@ listregions :: ReaderT Options IO ()
 listregions = do
     token <- liftM tokenArg ask
     liftIO $ do
-        value <- liftIO $ sendReq "regions" methodGet token L.empty
-        v <- decomposetoplevel "regions" value
+        v <- liftIO $ sendReq "regions" methodGet token L.empty >>=
+                decomposetoplevel "regions"
         forM_ (filter available v) $ \m ->
             let s = rslug m in
             when (isJust s) $ TIO.putStrLn $ fromJust $ s
@@ -365,8 +358,8 @@ listsizes :: ReaderT Options IO ()
 listsizes = do
     token <- liftM tokenArg ask
     liftIO $ do
-        value <- liftIO $ sendReq "sizes" methodGet token L.empty
-        v <- decomposetoplevel "sizes" value
+        v <- liftIO $ sendReq "sizes" methodGet token L.empty >>=
+                decomposetoplevel "sizes"
         forM_ v $ TIO.putStrLn . sslug
 
 header = "Usage: digitalocean [OPTION...] commands"
