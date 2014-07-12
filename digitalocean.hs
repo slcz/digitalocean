@@ -212,9 +212,9 @@ finddroplet = do
             ioError (userError $ "droplet " ++ T.unpack name ++ " not found")
         return $ did $ head drop
 
-sendReq :: FromJSON a => String -> Method -> B.ByteString -> L.ByteString ->
-            IO a
-sendReq urlpartial method token body = do
+sendReq' :: String -> Method -> B.ByteString -> L.ByteString ->
+            IO (Response L.ByteString)
+sendReq' urlpartial method token body = do
     req <- parseUrl $ digitalocean ++ urlpartial
     let headers = [(hAuthorization, "Bearer " `B.append` token)] ++
             if not $ L.null body
@@ -224,8 +224,17 @@ sendReq urlpartial method token body = do
         method = method,
         requestHeaders = headers,
         requestBody = RequestBodyLBS body }
-    resp <- withManager $ \man -> httpLbs req' man
+    withManager $ \man -> httpLbs req' man
+
+sendReq :: FromJSON a => String -> Method -> B.ByteString -> L.ByteString ->
+           IO a
+sendReq urlpartial method token body = do
+    resp <- sendReq' urlpartial method token body
     either (ioError . userError) return $ eitherDecode $ responseBody resp
+
+sendReq_ :: String -> Method -> B.ByteString -> L.ByteString -> IO ()
+sendReq_ urlpartial method token body =
+    sendReq' urlpartial method token body >> return ()
 
 deletedroplet :: ReaderT Options IO ()
 deletedroplet = do
@@ -235,9 +244,8 @@ deletedroplet = do
         liftIO $ ioError (userError ("please provide image name"))
     name <- return $ fromJust maybename
     i <- finddroplet
-    liftIO $ (sendReq ("droplets/" ++ show i)
-        methodDelete token L.empty :: IO Value)
-    return ()
+    liftIO $ (sendReq_ ("droplets/" ++ show i)
+        methodDelete token L.empty)
 
 {- Retrieve Images -}
 data Image = Image {
