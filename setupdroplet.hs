@@ -40,5 +40,16 @@ main = do
             [("chown", ["-R", user `T.append` ":" `T.append` user,
               home `T.append` ".ssh"])]
         sshPairs_ address [("sudo", ["apt-get", "update", "-q", "-y"]),
-                           ("sudo", ["apt-get", "install", "build-essential", "-q", "-y"])]
+                           ("sudo", ["apt-get", "install", "build-essential", "-q", "-y"]),
+                           ("sudo", ["apt-get", "install", "nbd-server", "-q", "-y"]),
+                           ("sudo", ["apt-get", "install", "nbd-client", "-q", "-y"]),
+                           ("sudo", ["apt-get", "install", "fio", "-q", "-y"]),
+                           ("sudo", ["apt-get", "install", "sysstat", "-q", "-y"]),
+                           ("sudo", ["apt-get", "install", "libaio1", "-q", "-y"])]
+        run_ "scp" [home `T.append` "pebble-bin/pebble",
+             address `T.append` ":" `T.append` home]
+        run_ "scp" [home `T.append` "pebble-bin/nbd-client",
+             address `T.append` ":" `T.append` home]
+        return ("set -o vi") -|- sshPairs_ address [("cat", [">>", "~/.bashrc"])]
+        sshPairs_ address [("sudo", ["chsh", "-s", "/bin/bash", user])]
         return ()

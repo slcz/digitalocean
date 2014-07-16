@@ -17,7 +17,7 @@ cabal-version:       >=1.10
 
 executable digitalocean
   main-is:             digitalocean.hs
-  -- other-modules:       
+  -- other-modules:
   -- other-extensions:    
   build-depends:       base >=4.7 && <4.8, transformers, bytestring, http-conduit, http-types, text, aeson
   -- hs-source-dirs:      
