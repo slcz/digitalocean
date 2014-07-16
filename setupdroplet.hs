@@ -27,7 +27,7 @@ main = do
     address <- return $ T.pack $ head args
     user <- return $ T.pack $ head $ tail args
     home <- return $ "/home/" `T.append` user `T.append` "/"
-    shelly $ silently $ do
+    shelly $ verbosely $ do
         sshPairs_ ("root@" `T.append` address) [("useradd", ["-m", user]),
              ("mkdir", ["-p",  home `T.append` ".ssh"])]
         return ("%" `T.append` user `T.append` " ALL=(ALL) NOPASSWD: ALL\n")
@@ -39,4 +39,6 @@ main = do
         sshPairs_ ("root@" `T.append` address)
             [("chown", ["-R", user `T.append` ":" `T.append` user,
               home `T.append` ".ssh"])]
+        sshPairs_ address [("sudo", ["apt-get", "update", "-q", "-y"]),
+                           ("sudo", ["apt-get", "install", "build-essential", "-q", "-y"])]
         return ()
