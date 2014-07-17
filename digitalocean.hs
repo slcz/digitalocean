@@ -10,6 +10,7 @@ import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Control.Monad
+import Text.Printf
 
 import Network.HTTP.Conduit
 
@@ -33,6 +34,7 @@ data Options = Options {
     regionArg :: T.Text,
     sizeArg  :: T.Text,
     imageArg :: T.Text,
+    imageidArg :: Integer,
     helpArg  :: Bool,
     tokenArg :: B.ByteString
 } deriving (Eq, Show)
@@ -43,6 +45,7 @@ defaultOptions = Options {
     regionArg = "nyc2",
     sizeArg = "512mb",
     imageArg = "ubuntu-14-04-x64",
+    imageidArg = 0,
     helpArg = False,
     tokenArg = B.empty
 }
@@ -61,6 +64,9 @@ options = [
     Option ['s'] ["size"]
         (ReqArg (\n o->o{sizeArg = T.pack n}) "Size")
         "size",
+    Option ['d'] ["imageid"]
+        (ReqArg (\n o->o{imageidArg = read n}) "Imageid")
+        "imageid",
     Option ['i'] ["image"]
         (ReqArg (\n o->o{imageArg = T.pack n}) "Image")
         "image" ]
@@ -77,7 +83,7 @@ data CreateDropletReq = CreateDropletReq {
     cname  :: !T.Text,
     cregion:: !T.Text,
     csize  :: !T.Text,
-    cimage :: !T.Text,
+    cimage :: Integer,
     cssh_keys :: ![Integer],
     cbackups:: Bool,
     cipv6  :: Bool,
@@ -114,7 +120,7 @@ makebody option keys =
         dropletname = fromJust $ nameArg option
         region = regionArg option
         size = sizeArg option
-        image = imageArg option
+        image = imageidArg option
 
 createdroplet :: ReaderT Options IO ()
 createdroplet = do
@@ -124,7 +130,11 @@ createdroplet = do
     when (not $ isJust maybename) $
         liftIO $ ioError (userError ("please provide image name"))
     keys <- liftIO $ listkeys token
-    bodytext <- return $ makebody option keys
+    imageid <- if imageidArg option == 0
+        then liftIO $ getimageid token (imageArg option)
+        else return $ imageidArg option
+    let newoption = option {imageidArg = imageid}
+    bodytext <- return $ makebody newoption keys
 
     liftIO $ (sendReq "droplets" methodPost token bodytext :: IO Value)
     return ()
@@ -199,8 +209,9 @@ listdroplets = do
                         | otherwise = head public'
                 private | null private' = ""
                         | otherwise = head private'
+                imageid  = T.pack $ show $ iid $ dimage m
             in  TIO.putStrLn $ dname m `T.append` " " `T.append` public
-                `T.append` " " `T.append` private
+                `T.append` " " `T.append` private `T.append` " " `T.append` imageid
 
 finddroplet :: ReaderT Options IO Integer
 finddroplet = do
@@ -274,15 +285,21 @@ decomposetoplevel :: FromJSON a => T.Text -> Object -> IO a
 decomposetoplevel key value = either (ioError . userError) return $
                                 parseEither (.: key) value
 
+getimageid :: B.ByteString -> T.Text -> IO Integer
+getimageid token image = do
+    v <- sendReq ("images/" ++ T.unpack image) methodGet token L.empty >>=
+            decomposetoplevel "image"
+    return $ iid v
+
 listimages :: ReaderT Options IO ()
 listimages = do
     token <- liftM tokenArg ask
     liftIO $ do
         v <- sendReq "images" methodGet token L.empty >>=
                 decomposetoplevel "images"
-        forM_ (filter public v) $ \m ->
-            let s = slug m in
-            when (isJust s) $ TIO.putStrLn $ fromJust $ s
+        forM_ (v) $ \m ->
+            putStrLn $ printf "%d %s %s" 
+                (iid m) (T.unpack $ name m) (T.unpack (maybe "Null" id (slug m)))
 
 {- Retrieve a list of keys -}
 data Key = Key {
