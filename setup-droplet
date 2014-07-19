@@ -1,0 +1,276 @@
+#!/usr/bin/bash
+
+USER=$1
+
+BIN=/home/${USER}/pebble-bin/
+SRC=/home/${USER}/pebble/
+DST=/home/${USER}/
+
+IMAGEID=4995963
+
+transfer=0
+if [ $# -eq 2 ]; then
+	if [ $2 = "kill" ]; then
+		for i in `seq 1 7`; do
+			${BIN}/digitalocean deletedroplet --name=test${i}
+		done
+		exit
+	fi
+	if [ $2 = "transfer" ]; then
+		transfer=1
+	fi
+fi
+
+if [ $transfer -eq 0 ]; then
+for i in `seq 1 7`; do
+	${BIN}/digitalocean createdroplet --name=test${i} --size=1gb --imageid=${IMAGEID}
+done
+fi
+
+echo "created 7 digitalocean instances"
+
+r=""
+while [ true ]; do
+	r=`${BIN}/digitalocean listdroplets | awk '/test[1-7]/ {print}'`
+	if [ `echo "$r" | wc -l` -eq 7 ]; then
+		break
+	fi
+done
+
+for i in `seq 1 7`; do
+	name=test${i}
+	f=`echo "$r" | grep $name`
+	echo $f
+	name[$i]=`echo $f|awk '{print $1}'`
+        ippub[$i]=`echo $f|awk '{print $2}'`
+	ippri[$i]=`echo $f|awk '{print $3}'`
+done
+echo "getting ip address"
+
+if [ $transfer -eq 0 ]; then
+echo "$r" | awk '{c=1; while (c != 0) {c=system("ping -c 1 -q " $2);}}'
+fi
+
+BYPASS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+
+server=${ippub[7]}
+
+if [ $transfer -eq 0 ]; then
+for i in `seq 1 6`; do
+    ssh ${BYPASS} ${server} sudo dd oflag=direct if=/dev/zero of=/store${i} bs=32M count=1 seek=127
+    ssh ${BYPASS} ${server} sudo chown nbd:nbd /store${i}
+done
+fi
+
+cat <<NBDSERVERCONFIG | ssh ${BYPASS} ${server} 'cat > ~/nbdserverconfig'
+[generic]
+    user = nbd
+    group = nbd
+[server1]
+    exportname=/store1
+    timeout=30
+    readonly = false
+    multifile = false
+    copyonwrite = false
+[server2]
+    exportname=/store2
+    timeout=30
+    readonly = false
+    multifile = false
+    copyonwrite = false
+[server3]
+    exportname=/store3
+    timeout=30
+    readonly = false
+    multifile = false
+    copyonwrite = false
+[server4]
+    exportname=/store4
+    timeout=30
+    readonly = false
+    multifile = false
+    copyonwrite = false
+[server5]
+    exportname=/store5
+    timeout=30
+    readonly = false
+    multifile = false
+    copyonwrite = false
+[server6]
+    exportname=/store6
+    timeout=30
+    readonly = false
+    multifile = false
+    copyonwrite = false
+NBDSERVERCONFIG
+
+cat <<CONFDOTC > ${SRC}/conf.c
+/*******************************************************************************
+ * System configurations.
+ ******************************************************************************/
+
+#include <stdio.h>
+#include <stdint.h>
+#include <raid.h>
+#include <conf.h>
+
+#define CLUSTER_NODES (RAID_SLICES + 2)
+
+struct configuration {
+	char *nbdname;
+	char *nbdexport;
+	char *ssd;
+	char *storage;
+	char *ip;
+	int  cache_en;
+	int  replicate_en;
+	uint16_t port;
+};
+
+struct configuration conf[CLUSTER_NODES] = {
+	{ "/tmp/nbd-pipe0",
+	  "nbd-unix-domain-0",
+	  "${DST}ssdcache",
+	  "/dev/nbd1",
+	  "${ippri[1]}",
+	  1,
+	  1,
+	  1700 },
+
+	{ "/tmp/nbd-pipe0",
+	  "nbd-unix-domain-0",
+	  "${DST}ssdcache",
+	  "/dev/nbd1",
+	  "${ippri[2]}",
+	  1,
+	  1,
+	  1700 },
+
+	{ "/tmp/nbd-pipe0",
+	  "nbd-unix-domain-0",
+	  "${DST}ssdcache",
+	  "/dev/nbd1",
+	  "${ippri[3]}",
+	  1,
+	  1,
+	  1700 },
+
+	{ "/tmp/nbd-pipe0",
+	  "nbd-unix-domain-0",
+	  "${DST}ssdcache",
+	  "/dev/nbd1",
+	  "${ippri[4]}",
+	  1,
+	  1,
+	  1700 },
+
+	{ "/tmp/nbd-pipe0",
+	  "nbd-unix-domain-0",
+	  "${DST}ssdcache",
+	  "/dev/nbd1",
+	  "${ippri[5]}",
+	  1,
+	  1,
+	  1700 },
+
+	{ "/tmp/nbd-pipe0",
+	  "nbd-unix-domain-0",
+	  "${DST}ssdcache",
+	  "/dev/nbd1",
+	  "${ippri[6]}",
+	  1,
+	  1,
+	  1700 }
+};
+
+int
+getclusters(void)
+{
+	return (CLUSTER_NODES);
+}
+
+char *
+getnbdname(int clusterid)
+{
+	return (conf[clusterid].nbdname);
+}
+
+char *
+getnbddomainname(int clusterid)
+{
+	return (conf[clusterid].nbdexport);
+}
+
+char *
+getssd(int clusterid)
+{
+	return (conf[clusterid].ssd);
+}
+
+char *
+getstorage(int clusterid)
+{
+	return (conf[clusterid].storage);
+}
+
+char *
+getip(int clusterid)
+{
+	return (conf[clusterid].ip);
+}
+
+uint16_t
+getport(int clusterid)
+{
+	return (conf[clusterid].port);
+}
+
+int
+getcache_en(int clusterid)
+{
+	return (conf[clusterid].cache_en);
+}
+
+int
+getreplicate_en(int clusterid)
+{
+	return (conf[clusterid]. replicate_en);
+}
+CONFDOTC
+
+cd ${SRC} && make && cp pebble ${BIN}
+
+ssh ${BYPASS} ${server} 'sudo nbd-server -C ~/nbdserverconfig'
+
+if [ $transfer -eq 0 ]; then
+for i in `seq 1 6`; do
+	ssh ${BYPASS} ${ippub[$i]} 'sudo dd if=/dev/zero of=${DST}ssdcache bs=32M count=1 seek=191'
+done
+fi
+
+# connect backend storage
+for i in `seq 1 6`; do
+	ssh ${BYPASS} ${ippub[$i]} "sudo ./nbd-client -d /dev/nbd1"
+	ssh ${BYPASS} ${ippub[$i]} "sudo ./nbd-client -N server${i} ${server} /dev/nbd1 -b 4096"
+done
+
+echo "kill old nbd service"
+if [ $transfer -eq 1 ]; then
+	ssh ${BYPASS} ${ippub[$i]} "sudo ./nbd-client -d /dev/nbd3"
+fi
+
+echo "start pebble service"
+for i in `seq 1 6`; do
+	inst=`expr $i - 1`
+	ssh ${BYPASS} ${ippub[$i]} "sudo killall -9 pebble"
+        echo "TRANSFER BINARY TO INSTANCE " ${inst}
+	scp ${BYPASS} ${SRC}pebble ${ippub[$i]}:~/
+        echo "STARTING SERVICE ON INSTANCE " ${inst}
+	ssh ${BYPASS} ${ippub[$i]} "sudo ./pebble ${inst} 0 log"
+done
+
+sleep 5
+
+for i in `seq 1 6`; do
+	ssh ${BYPASS} ${ippub[$i]} "sudo ./nbd-client -N nbd-unix-domain-0 127.0.0.1 /dev/nbd3 -b 4096 -u /tmp/nbd-pipe0"
+done
