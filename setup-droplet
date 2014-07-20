@@ -6,7 +6,7 @@ BIN=/home/${USER}/pebble-bin/
 SRC=/home/${USER}/pebble/
 DST=/home/${USER}/
 
-IMAGEID=4995963
+IMAGEID=5049621
 
 transfer=0
 if [ $# -eq 2 ]; then
@@ -23,7 +23,7 @@ fi
 
 if [ $transfer -eq 0 ]; then
 for i in `seq 1 7`; do
-	${BIN}/digitalocean createdroplet --name=test${i} --size=1gb --imageid=${IMAGEID}
+	${BIN}/digitalocean createdroplet --name=test${i} --size=2gb --imageid=${IMAGEID}
 done
 fi
 
@@ -57,7 +57,7 @@ server=${ippub[7]}
 
 if [ $transfer -eq 0 ]; then
 for i in `seq 1 6`; do
-    ssh ${BYPASS} ${server} sudo dd oflag=direct if=/dev/zero of=/store${i} bs=32M count=1 seek=127
+    ssh ${BYPASS} ${server} sudo dd oflag=direct if=/dev/zero of=/store${i} bs=32M count=1 seek=383
     ssh ${BYPASS} ${server} sudo chown nbd:nbd /store${i}
 done
 fi
@@ -160,7 +160,7 @@ struct configuration conf[CLUSTER_NODES] = {
 	  "${DST}ssdcache",
 	  "/dev/nbd1",
 	  "${ippri[4]}",
-	  1,
+	  0,
 	  1,
 	  1700 },
 
@@ -169,7 +169,7 @@ struct configuration conf[CLUSTER_NODES] = {
 	  "${DST}ssdcache",
 	  "/dev/nbd1",
 	  "${ippri[5]}",
-	  1,
+	  0,
 	  1,
 	  1700 },
 
@@ -178,7 +178,7 @@ struct configuration conf[CLUSTER_NODES] = {
 	  "${DST}ssdcache",
 	  "/dev/nbd1",
 	  "${ippri[6]}",
-	  1,
+	  0,
 	  1,
 	  1700 }
 };
@@ -238,13 +238,13 @@ getreplicate_en(int clusterid)
 }
 CONFDOTC
 
-cd ${SRC} && make && cp pebble ${BIN}
+cd ${SRC} && make clean && make && cp pebble ${BIN}
 
 ssh ${BYPASS} ${server} 'sudo nbd-server -C ~/nbdserverconfig'
 
 if [ $transfer -eq 0 ]; then
 for i in `seq 1 6`; do
-	ssh ${BYPASS} ${ippub[$i]} 'sudo dd if=/dev/zero of=${DST}ssdcache bs=32M count=1 seek=191'
+	ssh ${BYPASS} ${ippub[$i]} 'sudo dd if=/dev/zero of=${DST}ssdcache bs=32M count=1 seek=511'
 done
 fi
 
