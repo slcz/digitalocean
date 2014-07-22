@@ -1,0 +1,112 @@
+#!/usr/bin/bash
+
+USER=$1
+BIN=/home/${USER}/pebble-bin/
+IMAGEID=5099454
+
+if [ $# -eq 2 ]; then
+	if [ $2 = "kill" ]; then
+		for i in `seq 1 4`; do
+			${BIN}/digitalocean deletedroplet --name=node${i}
+		done
+		exit
+	fi
+fi
+
+for i in `seq 1 4`; do
+	${BIN}/digitalocean createdroplet --name=node${i} --size=4gb --imageid=${IMAGEID}
+done
+
+r=""
+while [ true ]; do
+	r=`${BIN}/digitalocean listdroplets | awk '/node[1-4]/ {print}'`
+	if [ `echo "$r" | wc -l` -eq 4 ]; then
+		break
+	fi
+done
+
+for i in `seq 1 4`; do
+        name=node${i}
+        f=`echo "$r" | grep $name`
+        echo $f
+        name[$i]=`echo $f|awk '{print $1}'`
+        ippub[$i]=`echo $f|awk '{print $2}'`
+        ippri[$i]=`echo $f|awk '{print $3}'`
+done
+
+echo "$r" | awk '{c=1; while (c != 0) {c=system("ping -c 1 -q " $2);}}'
+
+BYPASS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+
+for i in `seq 1 4`; do
+	rm -f /tmp/id_rsa.pub
+	echo "generating public key for ${ippub[$i]} ${name[$i]}"
+	ssh ${BYPASS} ${ippub[$i]} "rm -f /home/${USER}/.ssh/id_rsa* && ssh-keygen -t rsa -N \"\" -f /home/${USER}/.ssh/id_rsa"
+	scp ${BYPASS} ${ippub[$i]}:/home/${USER}/.ssh/id_rsa.pub /tmp/
+	for i in `seq 1 4`; do
+		cat /tmp/id_rsa.pub | ssh ${BYPASS} ${ippub[$i]} 'cat >> .ssh/authorized_keys'
+	done
+done
+
+rm -f /tmp/hosts
+cat <<HOSTS >/tmp/hosts
+127.0.0.1	localhost
+
+# The following lines are desirable for IPv6 capable hosts
+::1     ip6-localhost ip6-loopback
+fe00::0 ip6-localnet
+ff00::0 ip6-mcastprefix
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+HOSTS
+
+for i in `seq 1 4`; do
+	echo "${ippri[$i]} node${i}" >> /tmp/hosts
+done
+
+for i in `seq 1 4`; do
+	scp ${BYPASS} /tmp/hosts ${ippub[$i]}:/home/${USER}/
+	ssh ${BYPASS} ${ippub[$i]} "sudo mv -f /home/${USER}/hosts /etc/hosts"
+done
+
+rm -f /tmp/conf
+cat <<CEPHCONF >/tmp/conf
+fsid = c86ed25c-12eb-48b4-a189-241a6f6ffc94
+mon_initial_members = node1
+mon_host = ${ippri[1]}
+public_network = ${ippri[1]}/16
+auth_cluster_required = cephx
+auth_service_required = cephx
+auth_client_required = cephx
+osd_journal_size = 1000
+filestore_xattr_use_omap = true
+osd_pool_default_size = 3
+osd_pool_default_min_size = 1
+osd_pool_default_pg_num = 333
+osd_pool_default_pgp_num = 333
+osd_crush_chooseleaf_type = 1
+CEPHCONF
+
+for i in `seq 1 4`; do
+	scp ${BYPASS} /tmp/conf ${ippub[$i]}:/home/${USER}/
+	ssh ${BYPASS} ${ippub[$i]} "sudo mv -f /home/${USER}/conf /etc/ceph/ceph.conf"
+done
+
+# setup mon
+ssh ${BYPASS} ${ippub[1]} "ceph-authtool --create-keyring /tmp/ceph.mon.keyring --gen-key -n mon. --cap mon 'allow *'"
+ssh ${BYPASS} ${ippub[1]} "sudo ceph-authtool --create-keyring /etc/ceph/ceph.client.admin.keyring --gen-key -n client.admin --set-uid=0 --cap mon 'allow *' --cap osd 'allow *' --cap mds 'allow'"
+ssh ${BYPASS} ${ippub[1]} "ceph-authtool /tmp/ceph.mon.keyring --import-keyring /etc/ceph/ceph.client.admin.keyring"
+ssh ${BYPASS} ${ippub[1]} "sudo monmaptool --create --add node1 ${ippri[1]} --fsid c86ed25c-12eb-48b4-a189-241a6f6ffc94 /tmp/monmap"
+ssh ${BYPASS} ${ippub[1]} sudo mkdir /var/lib/ceph/mon/ceph-node1
+ssh ${BYPASS} ${ippub[1]} "sudo ceph-mon --mkfs -i node1 --monmap /tmp/monmap --keyring /tmp/ceph.mon.keyring"
+ssh ${BYPASS} ${ippub[1]} "sudo start ceph-mon id=node1"
+
+# now add osds
+ssh ${BYPASS} ${ippub[1]} "sudo cp /var/lib/ceph/bootstrap-osd/ceph.keyring /tmp && sudo chmod 0777 /tmp/ceph.keyring"
+echo 9
+for i in `seq 2 4`; do
+	ssh ${BYPASS} ${ippub[1]} "scp ${BYPASS} /tmp/ceph.keyring ${ippri[$i]}:/tmp"
+	ssh ${BYPASS} ${ippub[$i]} "sudo chmod 0777 /tmp/ceph.keyring && sudo mv /tmp/ceph.keyring /var/lib/ceph/bootstrap-osd/ceph.keyring && sudo mkdir -p /cephdata"
+	ssh ${BYPASS} ${ippub[$i]} "sudo ceph-disk prepare --cluster ceph --cluster-uuid c86ed25c-12eb-48b4-a189-241a6f6ffc94 --fs-type ext4 /cephdata"
+	ssh ${BYPASS} ${ippub[$i]} "sudo ceph-disk activate  /cephdata"
+done

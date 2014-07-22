@@ -6,12 +6,12 @@ BIN=/home/${USER}/pebble-bin/
 SRC=/home/${USER}/pebble/
 DST=/home/${USER}/
 
-IMAGEID=5049621
+IMAGEID=5099454
 
 transfer=0
 if [ $# -eq 2 ]; then
 	if [ $2 = "kill" ]; then
-		for i in `seq 1 7`; do
+		for i in `seq 1 6`; do
 			${BIN}/digitalocean deletedroplet --name=test${i}
 		done
 		exit
@@ -22,22 +22,22 @@ if [ $# -eq 2 ]; then
 fi
 
 if [ $transfer -eq 0 ]; then
-for i in `seq 1 7`; do
-	${BIN}/digitalocean createdroplet --name=test${i} --size=2gb --imageid=${IMAGEID}
+for i in `seq 1 6`; do
+	${BIN}/digitalocean createdroplet --name=test${i} --size=4gb --imageid=${IMAGEID}
 done
 fi
 
-echo "created 7 digitalocean instances"
+echo "created 6 digitalocean instances"
 
 r=""
 while [ true ]; do
-	r=`${BIN}/digitalocean listdroplets | awk '/test[1-7]/ {print}'`
-	if [ `echo "$r" | wc -l` -eq 7 ]; then
+	r=`${BIN}/digitalocean listdroplets | awk '/test[1-6]/ {print}'`
+	if [ `echo "$r" | wc -l` -eq 6 ]; then
 		break
 	fi
 done
 
-for i in `seq 1 7`; do
+for i in `seq 1 6`; do
 	name=test${i}
 	f=`echo "$r" | grep $name`
 	echo $f
@@ -47,62 +47,15 @@ for i in `seq 1 7`; do
 done
 echo "getting ip address"
 
-if [ $transfer -eq 0 ]; then
 echo "$r" | awk '{c=1; while (c != 0) {c=system("ping -c 1 -q " $2);}}'
-fi
+
+r=`${BIN}/digitalocean listdroplets | awk '/node1/ {print}'`
+cephname=`echo $r|awk '{print $1}'`
+cephip=`echo $r|awk '{print $2}'`
+cephpri=`echo $r|awk '{print $3}'`
+echo "Found CEPH ${cephname} ${cephip} ${cephpri}"
 
 BYPASS="-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
-
-server=${ippub[7]}
-
-if [ $transfer -eq 0 ]; then
-for i in `seq 1 6`; do
-    ssh ${BYPASS} ${server} sudo dd oflag=direct if=/dev/zero of=/store${i} bs=32M count=1 seek=383
-    ssh ${BYPASS} ${server} sudo chown nbd:nbd /store${i}
-done
-fi
-
-cat <<NBDSERVERCONFIG | ssh ${BYPASS} ${server} 'cat > ~/nbdserverconfig'
-[generic]
-    user = nbd
-    group = nbd
-[server1]
-    exportname=/store1
-    timeout=30
-    readonly = false
-    multifile = false
-    copyonwrite = false
-[server2]
-    exportname=/store2
-    timeout=30
-    readonly = false
-    multifile = false
-    copyonwrite = false
-[server3]
-    exportname=/store3
-    timeout=30
-    readonly = false
-    multifile = false
-    copyonwrite = false
-[server4]
-    exportname=/store4
-    timeout=30
-    readonly = false
-    multifile = false
-    copyonwrite = false
-[server5]
-    exportname=/store5
-    timeout=30
-    readonly = false
-    multifile = false
-    copyonwrite = false
-[server6]
-    exportname=/store6
-    timeout=30
-    readonly = false
-    multifile = false
-    copyonwrite = false
-NBDSERVERCONFIG
 
 cat <<CONFDOTC > ${SRC}/conf.c
 /*******************************************************************************
@@ -131,7 +84,7 @@ struct configuration conf[CLUSTER_NODES] = {
 	{ "/tmp/nbd-pipe0",
 	  "nbd-unix-domain-0",
 	  "${DST}ssdcache",
-	  "/dev/nbd1",
+	  "/dev/rbd/rbd/foo1",
 	  "${ippri[1]}",
 	  1,
 	  1,
@@ -140,7 +93,7 @@ struct configuration conf[CLUSTER_NODES] = {
 	{ "/tmp/nbd-pipe0",
 	  "nbd-unix-domain-0",
 	  "${DST}ssdcache",
-	  "/dev/nbd1",
+	  "/dev/rbd/rbd/foo2",
 	  "${ippri[2]}",
 	  1,
 	  1,
@@ -149,7 +102,7 @@ struct configuration conf[CLUSTER_NODES] = {
 	{ "/tmp/nbd-pipe0",
 	  "nbd-unix-domain-0",
 	  "${DST}ssdcache",
-	  "/dev/nbd1",
+	  "/dev/rbd/rbd/foo3",
 	  "${ippri[3]}",
 	  1,
 	  1,
@@ -158,7 +111,7 @@ struct configuration conf[CLUSTER_NODES] = {
 	{ "/tmp/nbd-pipe0",
 	  "nbd-unix-domain-0",
 	  "${DST}ssdcache",
-	  "/dev/nbd1",
+	  "/dev/rbd/rbd/foo4",
 	  "${ippri[4]}",
 	  0,
 	  1,
@@ -167,7 +120,7 @@ struct configuration conf[CLUSTER_NODES] = {
 	{ "/tmp/nbd-pipe0",
 	  "nbd-unix-domain-0",
 	  "${DST}ssdcache",
-	  "/dev/nbd1",
+	  "/dev/rbd/rbd/foo5",
 	  "${ippri[5]}",
 	  0,
 	  1,
@@ -176,7 +129,7 @@ struct configuration conf[CLUSTER_NODES] = {
 	{ "/tmp/nbd-pipe0",
 	  "nbd-unix-domain-0",
 	  "${DST}ssdcache",
-	  "/dev/nbd1",
+	  "/dev/rbd/rbd/foo6",
 	  "${ippri[6]}",
 	  0,
 	  1,
@@ -240,18 +193,20 @@ CONFDOTC
 
 cd ${SRC} && make clean && make && cp pebble ${BIN}
 
-ssh ${BYPASS} ${server} 'sudo nbd-server -C ~/nbdserverconfig'
-
 if [ $transfer -eq 0 ]; then
 for i in `seq 1 6`; do
-	ssh ${BYPASS} ${ippub[$i]} 'sudo dd if=/dev/zero of=${DST}ssdcache bs=32M count=1 seek=511'
+	ssh ${BYPASS} ${ippub[$i]} 'sudo dd if=/dev/zero of=${DST}ssdcache bs=32M count=1 seek=1023'
 done
 fi
 
 # connect backend storage
+rm -f /tmp/ceph.client.admin.keyring
+scp ${BYPASS} ${cephip}:/etc/ceph/ceph.client.admin.keyring /tmp
 for i in `seq 1 6`; do
-	ssh ${BYPASS} ${ippub[$i]} "sudo ./nbd-client -d /dev/nbd1"
-	ssh ${BYPASS} ${ippub[$i]} "sudo ./nbd-client -N server${i} ${server} /dev/nbd1 -b 4096"
+	scp ${BYPASS} /tmp/ceph.client.admin.keyring ${ippub[$i]}:/tmp
+	ssh ${BYPASS} ${ippub[$i]} "sudo mv /tmp/ceph.client.admin.keyring /etc/ceph/"
+	ssh ${BYPASS} ${ippub[$i]} "sudo rbd create foo${i} --size 16384 -m ${cephpri}"
+	ssh ${BYPASS} ${ippub[$i]} "sudo rbd map foo${i} --pool rbd --name client.admin -m ${cephpri}"
 done
 
 echo "kill old nbd service"
@@ -269,7 +224,7 @@ for i in `seq 1 6`; do
 	ssh ${BYPASS} ${ippub[$i]} "sudo ./pebble ${inst} 0 log"
 done
 
-sleep 5
+sleep 10
 
 for i in `seq 1 6`; do
 	ssh ${BYPASS} ${ippub[$i]} "sudo ./nbd-client -N nbd-unix-domain-0 127.0.0.1 /dev/nbd3 -b 4096 -u /tmp/nbd-pipe0"
